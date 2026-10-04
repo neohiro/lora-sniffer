@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: MIT
+#
+# One definition of "passing", on three platforms.
+#
+# `python tools/gate.py` is the portable-logic gate, and it is what the `gate` job runs on
+# every platform. Two more jobs sit beside it: `firmware` builds the images for the chip,
+# and `hygiene` runs the repository checks the gate does not cover.
+#
+# The matrix exists because the gate compiles the portable logic with
+# different compilers, and `-Wconversion` under GCC, Clang and MSVC does not flag the
+# same things -- so a narrow warning that CI on one platform does not catch would
+# otherwise sit unnoticed until the day somebody built it on another.
+
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          python --version
+          (g++ --version || clang++ --version || cl 2>&1 | head -1) 2>/dev/null || true
+
+      # The gate is the gate. Deliberately not a Makefile-only invocation: GitHub's
+      # Windows and macOS images do not guarantee make, and a Makefile-only gate fails
+      # on the runner for a reason that has nothing to do with the code.
+      - name: Run the gate
+        run: python tools/gate.py
+
+  regenerate:
+    name: tables are generated, not edited
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A partition table is read by the bootloader and has no log when it is wrong.
+      # The table must be reproducible from SlotPlan.hpp, so a regeneration that
+      # changes anything is a failure rather than a diff to review.
+      - name: Regenerating must be a no-op
+        run: |
+          python tools/gen_layouts.py
+          if ! git diff --quiet -- firmware/partitions; then
+            echo "::error::firmware/partitions is out of date. Run python tools/gen_layouts.py and commit the result."
+            git --no-pager diff -- firmware/partitions
+            exit 1
+          fi
+
+      - name: And the gate still passes afterwards
+        run: python tools/gate.py
+
+  firmware:
+    name: firmware builds for the chip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The host gate compiles the portable logic with a desktop compiler and cannot see
+      # any of this: RadioLib's real signatures, the ESP32 core's requirement that
+      # setup()/loop() be global, or whether a partition table is a table the chip's
+      # generator will accept. Every one of those was wrong at some point and every one
+      # of them was invisible until a build for the target ran.
+      #
+      # The standalone envs only, because the shared table's `littlefs` subtype needs a
+      # newer arduino-esp32 than this platform pins -- see docs/SLOTS.md. The beacon
+      # env is here so the transmit path is compiled rather than merely written.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+
+      # `-d firmware`: platformio.ini lives in firmware/, and PlatformIO does not search
+      # upwards for a project. Without it every `pio run` here fails with
+      # "Not a PlatformIO project" -- which is what it did when this job first said
+      # `pio run` from the repository root.
+      - name: Build the firmware
+        run: |
+          pio run -d firmware -e heltec_v4_sniffer_standalone
+          pio run -d firmware -e heltec_v4_sniffer_beacon_standalone
+
+      - name: The images exist and fit their slots
+        run: |
+          ls -l firmware/.pio/build/heltec_v4_sniffer_standalone/firmware.bin
+          ls -l firmware/.pio/build/heltec_v4_sniffer_beacon_standalone/firmware.bin
+
+  hygiene:
+    name: housekeeping
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Line endings, licence headers, cross-file consistency
+        run: python tests/test_repo_hygiene.py
