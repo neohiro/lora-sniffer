@@ -64,12 +64,39 @@ GCC_ONLY = ["-Wformat-truncation=2"]
 STRICT_MSVC = ["/std:c++17", "/W4", "/WX", "/permissive-", "/EHsc", "/Zi", "/Od"]
 
 
+def looks_like_clang(version_text: str) -> bool:
+    """Whether a compiler's `--version` output identifies it as Clang.
+
+    Split out from the subprocess so it can be tested directly. The version strings are
+    the whole input, and pretending otherwise is what made this bug twice.
+    """
+    return "clang" in version_text.lower()
+
+
+def is_clang(compiler: str) -> bool:
+    """Whether this compiler is Clang, asked rather than assumed.
+
+    Matching on the executable's *name* is not enough, and the failure is specific and
+    total: on macOS `g++` is a Clang, so `/usr/bin/g++` matched "g++", was given GCC's
+    `-Wformat-truncation=2`, and Clang rejected the option as unknown -- failing the
+    macOS build before compiling a line. Asking the compiler itself is one subprocess and
+    cannot be fooled by a name.
+    """
+    try:
+        proc = subprocess.run(
+            [compiler, "--version"], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return looks_like_clang(proc.stdout + proc.stderr)
+
+
 def flags_for(compiler: str) -> list[str]:
     """Strict flags for a compiler, chosen by what it actually accepts."""
     name = Path(compiler).name.lower()
     if "cl" in name and "clang" not in name:
         return list(STRICT_MSVC)
-    if "clang" in name:
+    if "clang" in name or is_clang(compiler):
         # Clang already warns about format truncation at the equivalent of level 2; it
         # just spells it without a level.
         return STRICT_COMMON + ["-Wformat-truncation"]
@@ -122,6 +149,7 @@ STRICT_MSVC = ["/std:c++17", "/W4", "/WX", "/permissive-", "/EHsc", "/Zi", "/Od"
 PY_TESTS = [
     "tests/test_sniffctl.py",
     "tests/test_flash_tool.py",
+    "tests/test_gate_driver.py",
     "tests/test_repo_hygiene.py",
 ]
 

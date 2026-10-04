@@ -167,6 +167,23 @@ places — `SlotPlan::validateForSniffer()`, `tools/flash.py::validate()`,
 > the other's filesystem type makes it format the wrong one on boot and lose the
 > settings of the other side of the pair, with no error anywhere.
 
+### One row differs from lora-multiboot
+
+[`neohiro/lora-multiboot`](https://github.com/neohiro/lora-multiboot) uses the same
+geometry — same first slot, same stride, same app and filesystem sizes — but declares
+`fs_meshtastic` as **`spiffs`** where this table declares **`littlefs`**.
+
+That is the whole of the disagreement, and it is not cosmetic in either direction:
+
+- Taking **this** table for a multiboot board hands Meshtastic a `littlefs` partition it
+  does not mount there.
+- Taking **multiboot's** table for a bridge-project board hands Meshtastic a `spiffs`
+  partition where the older firmware expects LittleFS.
+
+Whichever pair of projects you are running, take one project's table and add the sniffer
+slot to it. Do not mix rows from both. And whichever you take, the rule above still
+holds: the sniffer's filesystem is its own and is never shared with a mesh stack.
+
 ## Building these tables: `littlefs` and the platform version
 
 `triboot.csv` gives Meshtastic's slot the `littlefs` subtype, which is what that

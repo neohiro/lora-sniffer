@@ -157,6 +157,63 @@ project does not pretend otherwise. It is the useful version: flash the sniffer 
 2, look at the band, boot back into the repeater, and its settings are exactly as they
 were — because the sniffer never wrote to them. [SLOTS.md](docs/SLOTS.md)
 
+## Which boards
+
+The requirement is a board with an **SX1262** and an ESP32-family Arduino core. Nothing
+in the portable logic touches a radio, so a new board is a pin map and a board id.
+
+| Part | Requirement | Why |
+|---|---|---|
+| Radio | **SX1262** | `Sx1262Promiscuous` drives it through RadioLib. An SX1261 or SX1268 shares the SX126x register map and RadioLib's common base, and is the most likely port. An SX1276/SX1278 does **not**: packet mode, the IRQ map and the sync-word register all differ. |
+| MCU | ESP32 or ESP32-S3, Arduino | `main.cpp` needs `Arduino.h`, `Serial`, `LittleFS`-era `SPIFFS`, and `ESP.getFreeHeap()`. |
+| Flash | **4 MB** standalone, **16 MB** shared | One slot is a 2 MB app plus a 1 MB filesystem, so a single-slot board needs ~3.2 MB. The five-slot shared table needs ~15.2 MB and does not fit 8 MB. |
+| PSRAM | Optional | Selects the `psram` memory profile (256 devices, 256 ring lines). Without it the boot check falls back and says so. |
+
+Boards that meet those requirements, **none of them verified on hardware here** — this
+project has never been run on a board at all:
+
+| Board | MCU | Radio | Notes |
+|---|---|---|---|
+| Heltec WiFi LoRa 32 V4 | ESP32-S3 | SX1262 | the reference target; the one the pin map in `main.cpp` was written for |
+| Heltec WiFi LoRa 32 V3 | ESP32-S3 | SX1262 | what `platformio.ini` actually names, because PlatformIO has no V4 board definition |
+| Heltec LoRa 32 V3 | ESP32 | SX1262 | no WiFi, which costs the wireless transports but not the sniffer |
+| Waveshare ESP32-S3-LoRa-S3 | ESP32-S3 | SX1262 | |
+| Seeed XIAO S3 LoRa | ESP32-S3 | SX1262 | |
+| LilyGO T-Display-S3 | ESP32-S3 | SX1262 | |
+
+Porting is four lines. `main.cpp` sets `pins.cs`, `pins.irq`, `pins.rst` and `pins.busy`
+in one place, and `platformio.ini` names the board. Both are called out in the source as
+unverified, because a wrong `BUSY` pin is a modem that never completes a transaction and
+reports nothing.
+
+## Relationship with lora-multiboot
+
+[`neohiro/lora-multiboot`](https://github.com/neohiro/lora-multiboot) is the
+generalisation of the bridge project this firmware was first written against: a
+role-aware multi-slot platform for single-radio LoRa devices. **It names this
+repository as the implementation of its `sniffer` framework**, exposed as the
+`SN analyzer` role.
+
+What that means concretely:
+
+- **The slot geometry is identical.** Multiboot's `quadboot.csv` and this project's
+  `triboot.csv` agree on every address that matters — first slot `0x30000`, stride
+  `0x300000`, 2 MB app, 1 MB filesystem — so a slot address computed here is the address
+  multiboot uses. Nothing has to be translated.
+- **The slot the analyser goes in is a deployment choice, not a constant.** Multiboot's
+  reference five-slot board puts `SN analyzer` in **slot 3**. This project's shared table
+  pairs the sniffer with **slot 2** and labels its filesystem `fs_sniffer`. Both are
+  consistent with the geometry; they are different boards.
+- **Multiboot reports an advisory, not an error**, for an analyser beside a relay: the
+  analyser needs the receiver promiscuous, which is exactly what a repeater must not
+  have. Switching to the analyser silences the mesh, and it looks like a fault. That is
+  the single-radio constraint, not a defect in either project.
+- **One filesystem row differs.** Multiboot declares `fs_meshtastic` as `spiffs`; the
+  bridge project this firmware was written against uses `littlefs`, and so does
+  `triboot.csv` here. If you are pairing the two, take Multiboot's table and change the
+  sniffer's slot label to match — do not take this table and expect Meshtastic to be
+  happy with it.
+
 ## It cannot transmit
 
 ```
@@ -250,7 +307,7 @@ with nothing designed in them — which is why the device table here fills up wi
 answer: pay for the search once, and every later sighting becomes something you can
 recognise from across a room instead of something you diff.
 
-[**meshcore-vanity-key**](https://neohiro.github.io/meshcore-vanity-key/) does
+[**meshcore-vanity-key**](https://neohiro.github.io/meshcore-meshtastic-vanity-key/) does
 that. It mines Ed25519 keypairs until the encoded public key matches a pattern,
 entirely in the browser — Web Workers plus libsodium WASM, no network round-trip,
 no telemetry, working offline once loaded.
