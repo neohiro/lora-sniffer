@@ -248,6 +248,8 @@ tools/
   gen_layouts.py     regenerates the tables from the code's geometry
   flash.py           validating flasher
   sniffctl.py        the operator's CLI
+  make_labels.py     applies the repository's label set (idempotent)
+  check_repo.py      reports the repository's settings as GitHub sees them
 docs/
 ```
 
@@ -276,6 +278,7 @@ units rather than copies, so a test cannot pass while the firmware rots.
 | `CommandLine`, `Console` — one grammar, three destinations | done, tested |
 | `SlotPlan`, `RfPlanSource` | done, tested |
 | `tools/sniffctl.py`, `tools/flash.py` | done, tested |
+| `tools/make_labels.py`, `tools/check_repo.py` | repository setup, applied and verified |
 | `firmware/platformio.ini` envs `heltec_v4_sniffer_standalone`, `..._beacon_standalone` | **compile and link for ESP32-S3** (PlatformIO, `ci.yml` job `firmware`); not flashed to hardware |
 | `firmware/platformio.ini` envs `heltec_v4_sniffer`, `..._beacon` | defined; need arduino-esp32 3.x for the `littlefs` row in `triboot.csv` — see [SLOTS.md](docs/SLOTS.md) |
 | `Sx1262Promiscuous` — the radio | **written, not verified against hardware** |
