@@ -342,7 +342,7 @@ keypair to derive — the bytes *are* the key, which makes a vanity PSK a genuin
 this form:
 
 ```bash
-# browser: neohiro.github.io/meshcore-vanity-key — prefix box, suffix box, go
+# browser: neohiro.github.io/meshcore-meshtastic-vanity-key — prefix box, suffix box, go
 meshcore-vanity NHI --encoding base64              # channel key starting "NHI…"
 meshcore-vanity NHI --encoding base64 --suffix 0   # …and ending "…0"
 meshcore-vanity --encoding base64 --suffix qw      # suffix only
@@ -358,7 +358,7 @@ suffix has to end in one of `048AEIMQUYcgkosw`.
 **Node key and `!` user ID — a different curve, and one more derivation.** A
 Meshtastic node's key is **Curve25519**, not Ed25519, and the `!` + hex ID the
 firmware advertises is a *further* derivation from that node key — since firmware
-2.5, from the public-key identity rather than from a hardware MAC address, which is
+2.8, from the public-key identity rather than from a hardware MAC address, which is
 what lets a node keep its identity across a factory reset. Two separate things
 therefore have to line up:
 

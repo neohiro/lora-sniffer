@@ -73,34 +73,57 @@ def looks_like_clang(version_text: str) -> bool:
     return "clang" in version_text.lower()
 
 
-def is_clang(compiler: str) -> bool:
-    """Whether this compiler is Clang, asked rather than assumed.
+KIND_GCC = "gcc"
+KIND_CLANG = "clang"
+KIND_MSVC = "msvc"
+
+
+def compiler_kind(compiler: str) -> str:
+    """Which of the three flag sets a compiler needs, determined by asking it.
 
     Matching on the executable's *name* is not enough, and the failure is specific and
     total: on macOS `g++` is a Clang, so `/usr/bin/g++` matched "g++", was given GCC's
     `-Wformat-truncation=2`, and Clang rejected the option as unknown -- failing the
     macOS build before compiling a line. Asking the compiler itself is one subprocess and
     cannot be fooled by a name.
+
+    Returns one of `KIND_GCC`, `KIND_CLANG`, `KIND_MSVC`.
     """
+    name = Path(compiler).name.lower()
+    if "clang" in name:
+        return KIND_CLANG
+    if "cl" in name:
+        return KIND_MSVC
     try:
         proc = subprocess.run(
             [compiler, "--version"], capture_output=True, text=True, timeout=30
         )
     except (OSError, subprocess.SubprocessError):
-        return False
-    return looks_like_clang(proc.stdout + proc.stderr)
+        return KIND_GCC
+    return KIND_CLANG if looks_like_clang(proc.stdout + proc.stderr) else KIND_GCC
 
 
-def flags_for(compiler: str) -> list[str]:
-    """Strict flags for a compiler, chosen by what it actually accepts."""
-    name = Path(compiler).name.lower()
-    if "cl" in name and "clang" not in name:
+def flags_for_kind(kind: str) -> list[str]:
+    """Strict flags for a compiler kind.
+
+    Takes a *kind* rather than a path so it can be tested without a compiler present.
+    That separation matters: a test which calls this with the string "g++" asserts
+    something about the machine it runs on, because on macOS that name is a Clang. Such a
+    test passes on Linux and fails on the platform whose behaviour it was written to
+    describe.
+    """
+    if kind == KIND_MSVC:
         return list(STRICT_MSVC)
-    if "clang" in name or is_clang(compiler):
+    if kind == KIND_CLANG:
         # Clang already warns about format truncation at the equivalent of level 2; it
         # just spells it without a level.
         return STRICT_COMMON + ["-Wformat-truncation"]
     return STRICT_COMMON + GCC_ONLY
+
+
+def flags_for(compiler: str) -> list[str]:
+    """Strict flags for a compiler, chosen by what it actually accepts."""
+    return flags_for_kind(compiler_kind(compiler))
 
 FIRMWARE_SRC = [
     "firmware/src/Protocol.cpp",

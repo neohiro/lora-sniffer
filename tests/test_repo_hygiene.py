@@ -139,6 +139,65 @@ class Includes(unittest.TestCase):
         )
 
 
+class Workflow(unittest.TestCase):
+    """The CI workflow is configuration, and nothing else in the gate parses it.
+
+    A colon-space inside an unquoted YAML scalar is a mapping rather than part of the
+    string, so a step named `RX-only standalone: build and check` is a parse error --
+    and every job in the file fails to exist, silently, because a workflow that does not
+    parse is a workflow that does not run. Nothing caught it here: the firmware logic
+    passes, the Python suites pass, and the only symptom is a red tick nobody can explain.
+    """
+
+    WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+    def test_the_workflow_is_valid_yaml(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - PyYAML is present in CI
+            self.skipTest("PyYAML is not installed")
+
+        try:
+            doc = yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            self.fail(f"{self.WORKFLOW.name} does not parse: {exc}")
+        self.assertIsInstance(doc, dict, "the workflow must be a mapping at the top level")
+
+    def test_the_jobs_the_project_relies_on_all_exist(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("PyYAML is not installed")
+
+        doc = yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        jobs = doc.get("jobs") or {}
+        # `gate` is the portable logic. `firmware` is the only thing that compiles
+        # main.cpp and the radio layer, so without it a green run says nothing about
+        # whether the firmware builds. `hygiene` runs the checks the gate does not cover.
+        for required in ("gate", "regenerate", "firmware", "hygiene"):
+            self.assertIn(required, jobs, f"the {required} job is missing")
+
+    def test_every_firmware_job_builds_and_checks_an_image(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover
+            self.skipTest("PyYAML is not installed")
+
+        doc = yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        steps = (doc.get("jobs") or {}).get("firmware", {}).get("steps", [])
+        runs = "\n".join(str(step.get("run", "")) for step in steps)
+        self.assertIn("pio run -e", runs, "the firmware job must build something")
+        # PlatformIO removes the previous environment's build directory when it builds
+        # the next one, so each image has to be checked in the step that built it. A
+        # single check after both builds reports the first image missing, immediately
+        # below a build log that says it was written.
+        self.assertEqual(
+            runs.count("check_images.py"),
+            runs.count("pio run -e"),
+            "every build needs its own image check, immediately after it",
+        )
+
+
 class LineEndings(unittest.TestCase):
     def test_no_crlf(self):
         offenders = []

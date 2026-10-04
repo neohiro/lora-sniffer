@@ -107,21 +107,27 @@ void describeRecord(const Record& r, char* out, std::size_t cap) {
   std::size_t len = static_cast<std::size_t>(n);
   if (len >= sizeof(buf)) len = sizeof(buf) - 1;
 
+  // The longest `" <key>=<value>"` this function can be asked to append, plus its
+  // terminator: a leading space, the '=', and both fields at their declared capacities.
+  //
+  // Computed from Record.hpp's own constants rather than guessed, so it cannot drift when
+  // a field grows. GCC needs a compile-time lower bound on the remaining space to be
+  // convinced the '=' in the format string fits; "the buffer is big enough" is not
+  // something it can check, and it reported the '=' as truncatable into "a region of
+  // size between 0 and 1" until the bound was stated here.
+  constexpr std::size_t kLongestField =
+      1 + DecodedFields::kKeyBytes + 1 + DecodedFields::kValueBytes + 1;
+
   for (std::size_t i = 0; i < r.decoded.count; ++i) {
-    // The room is computed once, before the call, and the loop stops when it runs out.
-    //
-    // Passing `sizeof(buf) - len` inline and hoping GCC can prove it is at least one
-    // byte is how this ended up flagged on the Linux runner: it could not, and "region
-    // of size 0" for a `%s` is a truncation waiting to happen. Stating the bound here
-    // is both the fix and the proof.
-    if (len + 1 >= sizeof(buf)) break;
-    const std::size_t room = sizeof(buf) - len;
-    const int w = std::snprintf(buf + len, room, " %s=%s", r.decoded.fields[i].key,
-                                r.decoded.fields[i].value);
+    // Skip a field that cannot be written whole. Truncating mid-field produces a line
+    // that looks complete and is not, which is worse than leaving it out.
+    if (sizeof(buf) - len < kLongestField) break;
+
+    const int w = std::snprintf(buf + len, sizeof(buf) - len, " %s=%s",
+                                r.decoded.fields[i].key, r.decoded.fields[i].value);
     if (w <= 0) break;
-    // A short write means the field did not fit. Stop rather than advance past the end:
-    // `len` is only advanced by a count that provably fits.
-    if (static_cast<std::size_t>(w) >= room) break;
+    // Advance only by a count that provably fits.
+    if (static_cast<std::size_t>(w) >= sizeof(buf) - len) break;
     len += static_cast<std::size_t>(w);
   }
 

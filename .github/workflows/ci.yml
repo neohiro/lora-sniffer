@@ -104,21 +104,26 @@ jobs:
       # job looked for them under `firmware/.pio/build/` and failed with "No such file or
       # directory" -- immediately after a build that had plainly succeeded two lines up.
       # A working-directory is the same thing a developer does and cannot be misread.
-      - name: Build the firmware
+      # Built and checked one at a time, because PlatformIO deletes the previous
+      # environment's build directory when it builds the next one. Building both and then
+      # checking both reported the first image missing, directly below a build log that
+      # said it had been written. Checking each image in the step that built it is also
+      # better practice: the failure sits next to the build that caused it.
+      #
+      # Not `ls -l`. That checked a path and nothing else, and said nothing about the
+      # property worth checking, which is whether the image fits the slot it will be
+      # flashed into. tools/check_images.py does that, from the shipped table.
+      - name: "RX-only standalone: build and check"
         working-directory: firmware
         run: |
           pio run -e heltec_v4_sniffer_standalone
-          pio run -e heltec_v4_sniffer_beacon_standalone
+          python ../tools/check_images.py heltec_v4_sniffer_standalone
 
-      # Not `ls -l`. That checked the path and nothing else, and it failed in the most
-      # unhelpful way available: "No such file or directory" immediately below a build
-      # that had written exactly that path two lines earlier. It also said nothing about
-      # the thing worth checking, which is whether the image fits the slot it will be
-      # flashed into. tools/check_images.py does both, and when it cannot find an image
-      # it prints every path it looked at rather than only the one that came up empty.
-      - name: Each image fits the slot its table declares
+      - name: "Beacon standalone: build and check"
         working-directory: firmware
-        run: python ../tools/check_images.py
+        run: |
+          pio run -e heltec_v4_sniffer_beacon_standalone
+          python ../tools/check_images.py heltec_v4_sniffer_beacon_standalone
 
   hygiene:
     name: housekeeping

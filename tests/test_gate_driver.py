@@ -63,18 +63,27 @@ class ClangDetection(unittest.TestCase):
 
 
 class FlagSelection(unittest.TestCase):
+    """The flag sets themselves.
+
+    These call `flags_for_kind` with an explicit kind, never `flags_for("g++")`. That is
+    not a style preference: on macOS `g++` is a Clang, so a test that says "g++ gets
+    GCC's flags" is really asserting something about the machine it runs on. Such a test
+    passes on Linux and fails on the one platform whose behaviour it claims to describe,
+    which is exactly how the original bug survived a green build here.
+    """
+
     def test_gcc_gets_level_two(self):
-        self.assertIn(LEVEL2, gate.flags_for("g++"))
-        self.assertIn(LEVEL2, gate.flags_for("x86_64-w64-mingw32-g++"))
+        flags = gate.flags_for_kind(gate.KIND_GCC)
+        self.assertIn(LEVEL2, flags)
+        self.assertNotIn(UNLEVILED, flags)
 
     def test_clang_gets_the_unlevelled_warning(self):
-        for name in ("clang++", "clang", "clang++.exe"):
-            flags = gate.flags_for(name)
-            self.assertIn(UNLEVILED, flags, name)
-            self.assertNotIn(LEVEL2, flags, name)
+        flags = gate.flags_for_kind(gate.KIND_CLANG)
+        self.assertIn(UNLEVILED, flags)
+        self.assertNotIn(LEVEL2, flags)
 
     def test_msvc_gets_no_dash_w_flags_at_all(self):
-        flags = gate.flags_for("cl")
+        flags = gate.flags_for_kind(gate.KIND_MSVC)
         self.assertTrue(flags, "MSVC needs its own set, not an empty one")
         for flag in flags:
             self.assertFalse(flag.startswith("-W"), flag)
@@ -83,25 +92,56 @@ class FlagSelection(unittest.TestCase):
         """The defect, stated as a property.
 
         GCC and Clang disagree about how this warning is spelled, and passing the wrong
-        spelling is a hard error under -Werror rather than a warning nobody reads. So the
-        two sets must not share the option: whichever one a compiler gets, the other must
-        not.
+        spelling is a hard error under -Werror rather than a warning nobody reads. So no
+        two kinds may share the option.
         """
-        gcc_flags = gate.flags_for("g++")
-        clang_flags = gate.flags_for("clang++")
-        self.assertNotIn(LEVEL2, clang_flags)
-        self.assertNotIn(UNLEVILED, gcc_flags)
+        kinds = (gate.KIND_GCC, gate.KIND_CLANG, gate.KIND_MSVC)
+        for kind in kinds:
+            flags = gate.flags_for_kind(kind)
+            if kind != gate.KIND_GCC:
+                self.assertNotIn(LEVEL2, flags, kind)
+            if kind != gate.KIND_CLANG:
+                self.assertNotIn(UNLEVILED, flags, kind)
 
     def test_every_set_keeps_the_strict_baseline(self):
         """Whatever else changes, -Werror and the conversion warnings stay."""
-        for name in ("g++", "clang++", "cl"):
-            flags = gate.flags_for(name)
-            if name == "cl":
-                self.assertIn("/WX", flags, name)  # MSVC's -Werror
+        for kind in (gate.KIND_GCC, gate.KIND_CLANG, gate.KIND_MSVC):
+            flags = gate.flags_for_kind(kind)
+            if kind == gate.KIND_MSVC:
+                self.assertIn("/WX", flags, kind)  # MSVC's -Werror
             else:
-                self.assertIn("-Werror", flags, name)
-                self.assertIn("-Wconversion", flags, name)
-                self.assertIn("-Wsign-conversion", flags, name)
+                self.assertIn("-Werror", flags, kind)
+                self.assertIn("-Wconversion", flags, kind)
+                self.assertIn("-Wsign-conversion", flags, kind)
+
+    def test_an_unknown_kind_falls_back_to_gcc(self):
+        # A new compiler should get the strictest set rather than an empty one.
+        self.assertIn(LEVEL2, gate.flags_for_kind("something-new"))
+
+
+class CompilerIdentification(unittest.TestCase):
+    """Name first, then the compiler's own answer.
+
+    Only the unambiguous names are asserted here. What `g++` resolves to is a property of
+    the machine, which is the whole reason `looks_like_clang` exists.
+    """
+
+    def test_names_that_are_unambiguous(self):
+        cases = {
+            "clang++": gate.KIND_CLANG,
+            "clang": gate.KIND_CLANG,
+            "clang++.exe": gate.KIND_CLANG,
+            "C:/VS/bin/cl.exe": gate.KIND_MSVC,
+            "clang-tidy": gate.KIND_CLANG,
+        }
+        for name, want in cases.items():
+            self.assertEqual(gate.compiler_kind(name), want, name)
+
+    def test_clang_is_not_mistaken_for_msvc(self):
+        # "cl" is a substring of "clang". Getting this backwards sends every Clang build
+        # to the MSVC flag set, which fails immediately and obviously -- but only after
+        # the interesting mistake has been made.
+        self.assertEqual(gate.compiler_kind("clang++"), gate.KIND_CLANG)
 
 
 if __name__ == "__main__":
