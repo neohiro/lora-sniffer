@@ -7,6 +7,11 @@
 // blur would be worse than no test, because it would license a firmware that
 // prints its configuration as though it were a measurement.
 
+// test_rf_plan.cpp used strcmp() and relied on another header pulling in <cstring>.
+// That is fine on the machine that wrote it and fails on the Linux runner with
+// "'strcmp' was not declared in this scope", which is what a build matrix is for.
+#include <cstring>
+
 #include "harness.hpp"
 #include "sniffer/PlanRegistry.hpp"
 #include "sniffer/Protocol.hpp"

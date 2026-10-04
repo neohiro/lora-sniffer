@@ -37,6 +37,15 @@ STRICT_GCC = [
     "-Wall",
     "-Wextra",
     "-Wpedantic",
+    # Level 2, not the -Wformat-truncation that -Wall already implies.
+    #
+    # Level 1 only reports truncation it can prove for the arguments it can see, and it
+    # proved none of ours: three error strings in Classifier.cpp and SlotPlan.cpp were
+    # longer than their buffers and every Linux and Windows build passed. Clang reported
+    # all three on macOS and only macOS, which means the warning was never running
+    # anywhere it counted. Level 2 reasons about the format string itself, so the gate
+    # fails on the machine that is pushing rather than three platforms later.
+    "-Wformat-truncation=2",
     "-Wshadow",
     "-Wconversion",
     "-Wsign-conversion",

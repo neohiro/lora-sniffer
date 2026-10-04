@@ -7,8 +7,11 @@
 # to do with the code.
 
 CXX      ?= g++
+# -Wformat-truncation=2 rather than the level -Wall implies: level 1 proved none of
+# ours, and three error strings longer than their buffers passed every Linux and Windows
+# build. Level 2 fails on the machine that is pushing.
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Wshadow \
-            -Wconversion -Wsign-conversion -Werror
+            -Wconversion -Wsign-conversion -Wformat-truncation=2 -Werror
 PYTHON   ?= python3
 
 .PHONY: all check layouts clean

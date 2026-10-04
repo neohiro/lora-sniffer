@@ -92,6 +92,53 @@ def guarded_regions(src: str, macro: str) -> list[str]:
     return regions
 
 
+class Includes(unittest.TestCase):
+    """Every file that uses a C string function includes <cstring> itself.
+
+    `strcmp`, `strlen` and friends live in `<cstring>`. A translation unit that uses one
+    without including it compiles on whichever machine happened to include `<cstring>`
+    first, and fails on the others.
+
+    `tests/test_rf_plan.cpp` did exactly this: it used `strcmp()` and got the declaration
+    transitively from a header it included. Every Windows and macOS build passed and the
+    Linux runner failed with "'strcmp' was not declared in this scope". A build matrix
+    whose members disagree is only useful if something acts on the disagreement, so this
+    is the something.
+    """
+
+    FUNCTIONS = ("strcmp", "strncmp", "strlen", "strstr", "strchr", "strrchr", "memcmp")
+
+    def _sources(self):
+        for sub in ("firmware/src", "firmware/include/sniffer", "firmware/src/radio", "tests"):
+            directory = ROOT / sub
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.iterdir()):
+                if path.suffix in {".cpp", ".hpp"} and path.is_file():
+                    yield sub, path
+
+    def test_users_of_c_string_functions_include_cstring(self):
+        offenders = []
+        for sub, path in self._sources():
+            text = path.read_text(encoding="utf-8")
+            if "#include <cstring>" in text or "#include <string.h>" in text:
+                continue
+            # Only flag a *call*, not a mention in a comment or a member named strcmp.
+            body = "\n".join(
+                line for line in text.splitlines() if not line.lstrip().startswith("//")
+            )
+            for name in self.FUNCTIONS:
+                if re.search(rf"(?<![A-Za-z0-9_:]){name}\s*\(", body):
+                    offenders.append(f"{sub}/{path.name}: {name}()")
+                    break
+        self.assertEqual(
+            offenders,
+            [],
+            "uses a C string function without including <cstring>: "
+            + ", ".join(offenders),
+        )
+
+
 class LineEndings(unittest.TestCase):
     def test_no_crlf(self):
         offenders = []

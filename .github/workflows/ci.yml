@@ -34,10 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # One line, and valid in every shell this matrix runs: bash on Linux and macOS,
+      # PowerShell on Windows.
+      #
+      # This used to be POSIX -- `(g++ --version || clang++ --version || cl 2>&1 |
+      # head -1) 2>/dev/null || true` -- and the Windows runner executed it as
+      # PowerShell, where `2>/dev/null` is a redirect to a path called `D:\dev\null`.
+      # The step failed with "Could not find a part of the path 'D:\dev\null'" before
+      # the gate ever ran, which is the worst way for a diagnostic to fail: it looks
+      # like the code is broken and is actually the log line's shell syntax.
       - name: Show the toolchain
-        run: |
-          python --version
-          (g++ --version || clang++ --version || cl 2>&1 | head -1) 2>/dev/null || true
+        run: python --version
 
       # The gate is the gate. Deliberately not a Makefile-only invocation: GitHub's
       # Windows and macOS images do not guarantee make, and a Makefile-only gate fails
@@ -88,19 +95,33 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
 
-      # `-d firmware`: platformio.ini lives in firmware/, and PlatformIO does not search
-      # upwards for a project. Without it every `pio run` here fails with
-      # "Not a PlatformIO project" -- which is what it did when this job first said
-      # `pio run` from the repository root.
+      # `working-directory: firmware`, not `pio run -d firmware`.
+      #
+      # `platformio.ini` is in firmware/ and PlatformIO does not search upwards for a
+      # project, so the command needs to point at it somehow. But `-d firmware` resolves
+      # the *build directory* relative to the current directory rather than the project
+      # directory, so the images landed in `.pio/build/` at the repository root while this
+      # job looked for them under `firmware/.pio/build/` and failed with "No such file or
+      # directory" -- immediately after a build that had plainly succeeded two lines up.
+      # A working-directory is the same thing a developer does and cannot be misread.
       - name: Build the firmware
+        working-directory: firmware
         run: |
-          pio run -d firmware -e heltec_v4_sniffer_standalone
-          pio run -d firmware -e heltec_v4_sniffer_beacon_standalone
+          pio run -e heltec_v4_sniffer_standalone
+          pio run -e heltec_v4_sniffer_beacon_standalone
 
       - name: The images exist and fit their slots
+        working-directory: firmware
         run: |
-          ls -l firmware/.pio/build/heltec_v4_sniffer_standalone/firmware.bin
-          ls -l firmware/.pio/build/heltec_v4_sniffer_beacon_standalone/firmware.bin
+          ls -l .pio/build/heltec_v4_sniffer_standalone/firmware.bin
+          ls -l .pio/build/heltec_v4_sniffer_beacon_standalone/firmware.bin
+
+      # Not just "the file is there". A partition table that the image cannot be flashed
+      # with is the failure this whole layout is built to avoid, so the images are checked
+      # against the slot sizes the geometry declares.
+      - name: Each image fits the slot it is meant for
+        working-directory: firmware
+        run: python ../tools/check_images.py
 
   hygiene:
     name: housekeeping

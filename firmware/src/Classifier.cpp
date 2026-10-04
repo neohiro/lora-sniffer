@@ -233,11 +233,14 @@ Verdict classify(const Input& in) {
     v.protocol = Protocol::Unknown;
     v.basis = Basis::CarrierOnly;
     addEvidenceHex(&v, EvidenceKind::SyncWord, "unknown sync", in.link.syncWord);
+    // Fits `because` with room to spare. The sentence explains the verdict and stops;
+    // the longer reasoning lives in docs/ATTRIBUTION.md, where it can be read properly
+    // rather than scrolled past on a serial console. Clang's -Wformat-truncation
+    // enforces this, and the gate now asks GCC for the same warning.
     char text[128];
     std::snprintf(text, sizeof(text),
-                  "sync word 0x%02X belongs to no network this firmware has a row for, and the "
-                  "body matched nothing. On a shared band this is most likely another "
-                  "community, which is a finding rather than a fault",
+                  "sync word 0x%02X belongs to no network here and the body matched "
+                  "nothing: most likely another community",
                   static_cast<unsigned>(in.link.syncWord));
     setBecause(v.because, sizeof(v.because), text);
     v.reason = Reason::ForeignSyncWord;

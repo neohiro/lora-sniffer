@@ -251,11 +251,11 @@ LayoutReport validateSlots(Layout layout, std::uint8_t slots, std::uint8_t sniff
   // two, and the refusal explains *why* it is third rather than just stating the fact.
   if (snifferSlot >= slots) {
     rep.status = LayoutStatus::SnifferSlotMissing;
+    // Fits `detail`. It states the fact, that the position is deliberate, and stops: the
+    // full reasoning is in docs/SLOTS.md. Clang's -Wformat-truncation enforces this.
     std::snprintf(rep.detail, sizeof(rep.detail),
-                  "the sniffer lives in slot %u and this layout has %u. MeshCore first, then "
-                  "Meshtastic, then the sniffer -- it is offered third on purpose, because the "
-                  "first slot is what a virgin board comes up as, and that should be a working "
-                  "mesh node rather than a logger somebody forgot to turn off",
+                  "the sniffer lives in slot %u and this layout has %u. It is offered "
+                  "third on purpose: MeshCore, then Meshtastic, then the sniffer",
                   static_cast<unsigned>(snifferSlot), static_cast<unsigned>(slots));
     return rep;
   }
@@ -270,10 +270,10 @@ LayoutReport validateSlots(Layout layout, std::uint8_t slots, std::uint8_t sniff
     const Role other = roleAt(layout, i);
     if (std::strcmp(slotFsLabel(other), wantLabel) != 0) continue;
     rep.status = LayoutStatus::SharedFilesystem;
+    // Fits `detail`: states the offending slot and the consequence, and stops.
     std::snprintf(rep.detail, sizeof(rep.detail),
-                  "ota_%u (%s) shares the sniffer's filesystem label %s. A tool that boots "
-                  "into a slot it shares with a mesh stack has nowhere to keep its own "
-                  "settings except inside somebody else's",
+                  "ota_%u (%s) shares the sniffer's filesystem label %s: a slot shared "
+                  "with a mesh stack has nowhere to keep its own settings",
                   static_cast<unsigned>(i), roleName(other), wantLabel);
     return rep;
   }
