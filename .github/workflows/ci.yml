@@ -110,16 +110,13 @@ jobs:
           pio run -e heltec_v4_sniffer_standalone
           pio run -e heltec_v4_sniffer_beacon_standalone
 
-      - name: The images exist and fit their slots
-        working-directory: firmware
-        run: |
-          ls -l .pio/build/heltec_v4_sniffer_standalone/firmware.bin
-          ls -l .pio/build/heltec_v4_sniffer_beacon_standalone/firmware.bin
-
-      # Not just "the file is there". A partition table that the image cannot be flashed
-      # with is the failure this whole layout is built to avoid, so the images are checked
-      # against the slot sizes the geometry declares.
-      - name: Each image fits the slot it is meant for
+      # Not `ls -l`. That checked the path and nothing else, and it failed in the most
+      # unhelpful way available: "No such file or directory" immediately below a build
+      # that had written exactly that path two lines earlier. It also said nothing about
+      # the thing worth checking, which is whether the image fits the slot it will be
+      # flashed into. tools/check_images.py does both, and when it cannot find an image
+      # it prints every path it looked at rather than only the one that came up empty.
+      - name: Each image fits the slot its table declares
         working-directory: firmware
         run: python ../tools/check_images.py
 

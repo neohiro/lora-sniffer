@@ -40,9 +40,18 @@ bool DecodedFields::add(const char* key, unsigned long value) {
 }
 
 bool DecodedFields::addHex(const char* key, std::uint32_t value, int digits) {
-  char fmt[8];
+  // Clamped, not trusted. `digits` reaches here from decoders, and a format buffer
+  // sized for the two common cases is a buffer someone eventually overflows: a caller
+  // asking for 100 digits produced "0x%0100" truncated to "0x%01" in an 8-byte buffer,
+  // which formats as literal garbage rather than as a number. Eight is every digit a
+  // uint32_t can have.
+  if (digits < 1) digits = 1;
+  if (digits > 8) digits = 8;
+
+  char fmt[16];
   const int fn = std::snprintf(fmt, sizeof(fmt), "0x%%0%dX", digits);
-  if (fn < 0) return false;
+  if (fn < 0 || static_cast<std::size_t>(fn) >= sizeof(fmt)) return false;
+
   char buf[kValueBytes];
   const int n = std::snprintf(buf, sizeof(buf), fmt, static_cast<unsigned>(value));
   if (n < 0) return false;
@@ -50,9 +59,16 @@ bool DecodedFields::addHex(const char* key, std::uint32_t value, int digits) {
 }
 
 bool DecodedFields::addFloat(const char* key, double value, int decimals) {
-  char fmt[8];
+  // Clamped for the same reason. Six is past the point where a JSON field gains
+  // information: a double carries about 15 significant digits, and a field wider than
+  // that is noise in a capture file.
+  if (decimals < 0) decimals = 0;
+  if (decimals > 6) decimals = 6;
+
+  char fmt[16];
   const int fn = std::snprintf(fmt, sizeof(fmt), "%%.%df", decimals);
-  if (fn < 0) return false;
+  if (fn < 0 || static_cast<std::size_t>(fn) >= sizeof(fmt)) return false;
+
   char buf[kValueBytes];
   const int n = std::snprintf(buf, sizeof(buf), fmt, value);
   if (n < 0) return false;
@@ -92,11 +108,21 @@ void describeRecord(const Record& r, char* out, std::size_t cap) {
   if (len >= sizeof(buf)) len = sizeof(buf) - 1;
 
   for (std::size_t i = 0; i < r.decoded.count; ++i) {
-    const int w = std::snprintf(buf + len, sizeof(buf) - len, " %s=%s", r.decoded.fields[i].key,
+    // The room is computed once, before the call, and the loop stops when it runs out.
+    //
+    // Passing `sizeof(buf) - len` inline and hoping GCC can prove it is at least one
+    // byte is how this ended up flagged on the Linux runner: it could not, and "region
+    // of size 0" for a `%s` is a truncation waiting to happen. Stating the bound here
+    // is both the fix and the proof.
+    if (len + 1 >= sizeof(buf)) break;
+    const std::size_t room = sizeof(buf) - len;
+    const int w = std::snprintf(buf + len, room, " %s=%s", r.decoded.fields[i].key,
                                 r.decoded.fields[i].value);
     if (w <= 0) break;
+    // A short write means the field did not fit. Stop rather than advance past the end:
+    // `len` is only advanced by a count that provably fits.
+    if (static_cast<std::size_t>(w) >= room) break;
     len += static_cast<std::size_t>(w);
-    if (len >= sizeof(buf) - 1) break;
   }
 
   const int tail = std::snprintf(buf + len, sizeof(buf) - len, " x%u !%s rssi=%d",

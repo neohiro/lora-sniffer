@@ -30,27 +30,50 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Mirrors CXXFLAGS in the Makefile. -Werror is the point: a warning that would
 # once have been a note fails the build instead of quietly accumulating.
-STRICT_GCC = [
+STRICT_COMMON = [
     "-std=c++17",
     "-O1",
     "-g",
     "-Wall",
     "-Wextra",
     "-Wpedantic",
-    # Level 2, not the -Wformat-truncation that -Wall already implies.
-    #
-    # Level 1 only reports truncation it can prove for the arguments it can see, and it
-    # proved none of ours: three error strings in Classifier.cpp and SlotPlan.cpp were
-    # longer than their buffers and every Linux and Windows build passed. Clang reported
-    # all three on macOS and only macOS, which means the warning was never running
-    # anywhere it counted. Level 2 reasons about the format string itself, so the gate
-    # fails on the machine that is pushing rather than three platforms later.
-    "-Wformat-truncation=2",
     "-Wshadow",
     "-Wconversion",
     "-Wsign-conversion",
     "-Werror",
 ]
+
+# Level 2, not the -Wformat-truncation that -Wall already implies -- and GCC only.
+#
+# Level 1 reports only the truncation it can prove from the arguments it can see, and it
+# proved none of ours: five error strings in Classifier.cpp, SlotPlan.cpp and Record.cpp
+# were longer than their buffers, and every Windows and macOS build passed. Clang found
+# three of them on macOS and GCC on Linux found two more, which is the argument for
+# turning it on rather than relying on whichever compiler happened to notice.
+#
+# It is level 2 *because* it reasons about the format string itself, which is what
+# catches a width that depends on a runtime value.
+#
+# GCC-only, and this is not a detail: Clang has no level 2 and rejects the option as
+# `-Wunknown-warning-option`, which under -Werror fails the macOS build before it
+# compiles anything. Adding it to the shared list broke two platforms to fix a warning on
+# one.
+GCC_ONLY = ["-Wformat-truncation=2"]
+
+# MSVC has no -W flags and no notion of -Wconversion, so it gets its own set.
+STRICT_MSVC = ["/std:c++17", "/W4", "/WX", "/permissive-", "/EHsc", "/Zi", "/Od"]
+
+
+def flags_for(compiler: str) -> list[str]:
+    """Strict flags for a compiler, chosen by what it actually accepts."""
+    name = Path(compiler).name.lower()
+    if "cl" in name and "clang" not in name:
+        return list(STRICT_MSVC)
+    if "clang" in name:
+        # Clang already warns about format truncation at the equivalent of level 2; it
+        # just spells it without a level.
+        return STRICT_COMMON + ["-Wformat-truncation"]
+    return STRICT_COMMON + GCC_ONLY
 
 FIRMWARE_SRC = [
     "firmware/src/Protocol.cpp",
@@ -108,31 +131,34 @@ class GateError(RuntimeError):
 
 
 def find_compiler(explicit: str | None) -> tuple[str, list[str]]:
-    """Return (compiler, base_flags). Prefers whatever the caller named."""
+    """Return (compiler, flags-for-that-compiler). Prefers whatever the caller named.
+
+    The flags come from `flags_for()` rather than a single constant, because the warning
+    set is not the same on every compiler and a shared list cannot be: see the note on
+    `GCC_ONLY`.
+    """
     if explicit:
         for cand in (explicit, f"{explicit}.exe"):
             found = shutil.which(cand)
             if found:
-                if "cl" in Path(found).name.lower():
-                    return found, STRICT_MSVC
-                return found, STRICT_GCC
+                return found, flags_for(found)
         # An absolute path that `which` will not resolve (a bare path with no
         # directory entry, for instance) is still worth trying directly.
         if Path(explicit).is_file():
-            return explicit, STRICT_MSVC if "cl" in Path(explicit).name.lower() else STRICT_GCC
+            return explicit, flags_for(explicit)
         raise GateError(f"compiler not found: {explicit}")
 
     # MSVC first when this is a Visual Studio developer shell.
     if os.environ.get("VSCMD_ARG_TGT_ARCH"):
         cl = shutil.which("cl")
         if cl:
-            return cl, STRICT_MSVC
+            return cl, flags_for(cl)
 
     for cand in ("g++", "clang++", "c++"):
         found = shutil.which(cand)
         if found:
-            return found, STRICT_GCC
-    return "cl", STRICT_MSVC
+            return found, flags_for(found)
+    return "cl", flags_for("cl")
 
 
 def compile_and_run(verbose: bool) -> int:
